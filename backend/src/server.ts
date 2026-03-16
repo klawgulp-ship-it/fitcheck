@@ -3,6 +3,7 @@ import cors from 'cors';
 import path from 'path';
 import garmentRoutes from './routes/garments';
 import outfitRoutes from './routes/outfits';
+import scanRoutes from './routes/scan';
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001');
@@ -17,6 +18,7 @@ app.use('/uploads', express.static(UPLOAD_DIR));
 // API routes
 app.use('/api/garments', garmentRoutes);
 app.use('/api/outfits', outfitRoutes);
+app.use('/api/scan', scanRoutes);
 
 // Serve frontend in production
 const frontendDist = path.join(__dirname, '..', '..', 'frontend', 'dist');

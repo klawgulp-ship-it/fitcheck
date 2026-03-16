@@ -75,6 +75,37 @@ export async function createOutfit(name: string, items: { garment_id: string; po
   return res.json();
 }
 
+export interface DetectedItem {
+  id: string;
+  name: string;
+  category: string;
+  color: string;
+  season: string;
+  position: string;
+}
+
+export interface ScanResult {
+  scan_image: string;
+  items: DetectedItem[];
+}
+
+export async function scanCloset(file: File): Promise<ScanResult> {
+  const form = new FormData();
+  form.append('image', file);
+  const res = await fetch(`${BASE}/scan/detect`, { method: 'POST', body: form });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function bulkSaveGarments(file: File, items: { name: string; category: string; color: string; season: string }[]): Promise<Garment[]> {
+  const form = new FormData();
+  form.append('image', file);
+  form.append('items', JSON.stringify(items));
+  const res = await fetch(`${BASE}/scan/bulk`, { method: 'POST', body: form });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 export async function markWorn(outfitId: string): Promise<Outfit> {
   const res = await fetch(`${BASE}/outfits/${outfitId}/wear`, {
     method: 'POST',

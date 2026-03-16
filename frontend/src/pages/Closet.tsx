@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { getGarments, uploadGarment, deleteGarment, Garment } from '../api';
+import { getGarments, uploadGarment, deleteGarment, scanCloset, bulkSaveGarments, Garment, DetectedItem } from '../api';
 
 const CATEGORIES = ['all', 'tops', 'bottoms', 'shoes', 'outerwear', 'accessories', 'other'];
 
@@ -12,6 +12,17 @@ export default function Closet() {
   const [file, setFile] = useState<File | null>(null);
   const [meta, setMeta] = useState({ name: '', category: 'tops', color: '', season: '' });
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // Scan state
+  const [showScan, setShowScan] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [scanFile, setScanFile] = useState<File | null>(null);
+  const [scanPreview, setScanPreview] = useState<string | null>(null);
+  const [detectedItems, setDetectedItems] = useState<DetectedItem[]>([]);
+  const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+  const [editingItem, setEditingItem] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const scanFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadGarments();
@@ -51,6 +62,77 @@ export default function Closet() {
     loadGarments();
   }
 
+  // --- Scan functions ---
+
+  function handleScanFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    setScanFile(f);
+    setScanPreview(URL.createObjectURL(f));
+    setDetectedItems([]);
+    setSelectedItems(new Set());
+  }
+
+  async function handleScan() {
+    if (!scanFile) return;
+    setScanning(true);
+    try {
+      const result = await scanCloset(scanFile);
+      setDetectedItems(result.items);
+      // Select all by default
+      setSelectedItems(new Set(result.items.map(i => i.id)));
+    } catch (err: any) {
+      console.error(err);
+      alert('Scan failed — try a clearer photo');
+    }
+    setScanning(false);
+  }
+
+  function toggleItem(id: string) {
+    setSelectedItems(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function updateDetectedItem(id: string, field: string, value: string) {
+    setDetectedItems(prev => prev.map(item =>
+      item.id === id ? { ...item, [field]: value } : item
+    ));
+  }
+
+  async function handleBulkSave() {
+    if (!scanFile || selectedItems.size === 0) return;
+    setSaving(true);
+    try {
+      const itemsToSave = detectedItems
+        .filter(i => selectedItems.has(i.id))
+        .map(({ name, category, color, season }) => ({ name, category, color, season }));
+      await bulkSaveGarments(scanFile, itemsToSave);
+      setShowScan(false);
+      setScanFile(null);
+      setScanPreview(null);
+      setDetectedItems([]);
+      setSelectedItems(new Set());
+      loadGarments();
+    } catch (err) {
+      console.error(err);
+      alert('Failed to save items');
+    }
+    setSaving(false);
+  }
+
+  function closeScan() {
+    setShowScan(false);
+    setScanFile(null);
+    setScanPreview(null);
+    setDetectedItems([]);
+    setSelectedItems(new Set());
+    setEditingItem(null);
+  }
+
   return (
     <>
       <div className="tabs">
@@ -79,8 +161,16 @@ export default function Closet() {
         </div>
       )}
 
+      {/* Two FABs: scan + single add */}
+      <button className="fab fab-scan" onClick={() => setShowScan(true)} title="Scan Closet">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="24" height="24">
+          <path d="M2 7V2h5M17 2h5v5M22 17v5h-5M7 22H2v-5"/>
+          <rect x="6" y="6" width="12" height="12" rx="1"/>
+        </svg>
+      </button>
       <button className="fab" onClick={() => setShowUpload(true)}>+</button>
 
+      {/* Single upload modal (existing) */}
       {showUpload && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowUpload(false); }}>
           <div className="modal">
@@ -137,6 +227,136 @@ export default function Closet() {
             <button className="btn" onClick={handleUpload} disabled={!file || uploading}>
               {uploading ? 'Adding...' : 'Add to Closet'}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Scan Closet modal */}
+      {showScan && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeScan(); }}>
+          <div className="modal scan-modal">
+            <h2>Scan Closet</h2>
+
+            <input ref={scanFileRef} type="file" accept="image/*" capture="environment" onChange={handleScanFile} style={{ display: 'none' }} />
+
+            {/* Step 1: Take/pick photo */}
+            {!detectedItems.length && (
+              <>
+                <div className="capture-area" onClick={() => scanFileRef.current?.click()}>
+                  {scanPreview ? (
+                    <img src={scanPreview} alt="Closet preview" />
+                  ) : (
+                    <>
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                        <path d="M2 7V2h5M17 2h5v5M22 17v5h-5M7 22H2v-5"/>
+                        <rect x="6" y="6" width="12" height="12" rx="1"/>
+                      </svg>
+                      <p>Take a wide shot of your closet, rack, or drawer</p>
+                    </>
+                  )}
+                </div>
+
+                <button className="btn" onClick={handleScan} disabled={!scanFile || scanning}>
+                  {scanning ? 'AI is scanning...' : 'Scan for Items'}
+                </button>
+
+                {scanning && (
+                  <div className="scan-progress">
+                    <div className="scan-spinner"></div>
+                    <p>Identifying clothes — sideways, folded, hanging — all of it...</p>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* Step 2: Review detected items */}
+            {detectedItems.length > 0 && (
+              <>
+                <div className="scan-preview-strip">
+                  <img src={scanPreview!} alt="Scanned closet" />
+                </div>
+
+                <div className="scan-summary">
+                  Found <strong>{detectedItems.length}</strong> items — tap to edit, uncheck to skip
+                </div>
+
+                <div className="detected-list">
+                  {detectedItems.map(item => (
+                    <div key={item.id} className={`detected-item ${selectedItems.has(item.id) ? 'selected' : 'deselected'}`}>
+                      <div className="detected-check" onClick={() => toggleItem(item.id)}>
+                        {selectedItems.has(item.id) ? (
+                          <svg viewBox="0 0 24 24" fill="var(--accent)" width="22" height="22">
+                            <rect width="24" height="24" rx="6"/>
+                            <path d="M9 12l2 2 4-4" stroke="white" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        ) : (
+                          <svg viewBox="0 0 24 24" fill="none" stroke="var(--text2)" strokeWidth="2" width="22" height="22">
+                            <rect x="1" y="1" width="22" height="22" rx="6"/>
+                          </svg>
+                        )}
+                      </div>
+
+                      <div className="detected-info" onClick={() => setEditingItem(editingItem === item.id ? null : item.id)}>
+                        <div className="detected-name">{item.name}</div>
+                        <div className="detected-meta">
+                          <span className="detected-tag">{item.category}</span>
+                          {item.color && <span className="detected-tag">{item.color}</span>}
+                          <span className="detected-tag">{item.season}</span>
+                        </div>
+                        {item.position && <div className="detected-position">{item.position}</div>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Inline edit for a detected item */}
+                {editingItem && (() => {
+                  const item = detectedItems.find(i => i.id === editingItem);
+                  if (!item) return null;
+                  return (
+                    <div className="detected-edit">
+                      <div className="form-group">
+                        <label>Name</label>
+                        <input value={item.name} onChange={e => updateDetectedItem(item.id, 'name', e.target.value)} />
+                      </div>
+                      <div className="form-group">
+                        <label>Category</label>
+                        <div className="category-pills">
+                          {CATEGORIES.filter(c => c !== 'all').map(c => (
+                            <button key={c} className={`pill ${item.category === c ? 'active' : ''}`}
+                              onClick={() => updateDetectedItem(item.id, 'category', c)}>
+                              {c.charAt(0).toUpperCase() + c.slice(1)}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="form-group">
+                        <label>Color</label>
+                        <input value={item.color} onChange={e => updateDetectedItem(item.id, 'color', e.target.value)} />
+                      </div>
+                      <div className="form-group">
+                        <label>Season</label>
+                        <div className="category-pills">
+                          {['spring', 'summer', 'fall', 'winter', 'all'].map(s => (
+                            <button key={s} className={`pill ${item.season === s ? 'active' : ''}`}
+                              onClick={() => updateDetectedItem(item.id, 'season', s)}>
+                              {s.charAt(0).toUpperCase() + s.slice(1)}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div className="scan-actions">
+                  <button className="btn btn-outline" onClick={closeScan}>Cancel</button>
+                  <button className="btn" onClick={handleBulkSave} disabled={selectedItems.size === 0 || saving}>
+                    {saving ? 'Saving...' : `Add ${selectedItems.size} Items`}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
