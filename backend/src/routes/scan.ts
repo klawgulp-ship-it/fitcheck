@@ -4,7 +4,7 @@ import sharp from 'sharp';
 import path from 'path';
 import fs from 'fs';
 import { v4 as uuid } from 'uuid';
-import Anthropic from '@anthropic-ai/sdk';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import db from '../db';
 
 const router = Router();
@@ -14,41 +14,21 @@ const THUMB_DIR = path.join(UPLOAD_DIR, 'thumbnails');
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB for wide closet shots
+  limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     if (file.mimetype.startsWith('image/')) cb(null, true);
     else cb(new Error('Only images allowed'));
   }
 });
 
-function getClient() {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
-  return new Anthropic({ apiKey });
+function getModel() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error('GEMINI_API_KEY not set');
+  const genAI = new GoogleGenerativeAI(apiKey);
+  return genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
 }
 
-// Scan a closet photo — returns detected garments
-router.post('/detect', upload.single('image'), async (req: Request, res: Response) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
-
-    const client = getClient();
-    const base64 = req.file.buffer.toString('base64');
-    const mediaType = req.file.mimetype as 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif';
-
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 4096,
-      messages: [{
-        role: 'user',
-        content: [
-          {
-            type: 'image',
-            source: { type: 'base64', media_type: mediaType, data: base64 }
-          },
-          {
-            type: 'text',
-            text: `You are a fashion AI analyzing a photo of a closet, clothing rack, drawer, or pile of clothes.
+const SCAN_PROMPT = `You are a fashion AI analyzing a photo of a closet, clothing rack, drawer, or pile of clothes.
 
 Identify EVERY distinct clothing item or accessory visible in the image. Clothes may be:
 - Hanging sideways, upside down, or at angles
@@ -68,13 +48,28 @@ Respond ONLY with a JSON array. No markdown, no explanation. Example:
   {"name": "Blue slim jeans", "category": "bottoms", "color": "blue", "season": "all", "position": "folded on shelf, right"}
 ]
 
-If you can't identify any clothing items, return an empty array: []`
-          }
-        ]
-      }]
-    });
+If you can't identify any clothing items, return an empty array: []`;
 
-    const text = response.content[0].type === 'text' ? response.content[0].text : '';
+// Scan a closet photo — returns detected garments (Gemini Flash = free tier)
+router.post('/detect', upload.single('image'), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No image uploaded' });
+
+    const model = getModel();
+    const base64 = req.file.buffer.toString('base64');
+    const mimeType = req.file.mimetype;
+
+    const result = await model.generateContent([
+      {
+        inlineData: {
+          mimeType,
+          data: base64,
+        }
+      },
+      { text: SCAN_PROMPT }
+    ]);
+
+    const text = result.response.text();
 
     // Parse JSON — handle potential markdown wrapping
     let items: any[];
@@ -122,7 +117,7 @@ router.post('/bulk', upload.single('image'), async (req: Request, res: Response)
       const imageName = `${uuid()}${path.extname(req.file.originalname || '.jpg')}`;
       const imagePath = path.join(UPLOAD_DIR, imageName);
 
-      // Save the full scan image as the garment image (user scanned whole closet)
+      // Save the full scan image as the garment image
       fs.writeFileSync(imagePath, req.file.buffer);
 
       // Generate thumbnail
