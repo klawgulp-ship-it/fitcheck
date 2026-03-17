@@ -605,3 +605,92 @@ body {
 .btn-outline:active:not(:disabled) {
   background: var(--surface2);
 }
+
+/* Cropped item thumbnail in detected list */
+.detected-thumb {
+  width: 52px;
+  height: 52px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface2);
+  flex-shrink: 0;
+}
+
+.detected-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Outfit suggestions */
+.suggestion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 55dvh;
+  overflow-y: auto;
+  margin-bottom: 8px;
+}
+
+.suggestion-card {
+  background: var(--bg);
+  border-radius: 14px;
+  padding: 14px;
+  border: 1px solid var(--surface2);
+}
+
+.suggestion-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.suggestion-header h3 {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.btn-small {
+  padding: 8px 16px;
+  font-size: 13px;
+  border-radius: 10px;
+  width: auto;
+  margin-top: 0;
+}
+
+.suggestion-items {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  scrollbar-width: none;
+}
+
+.suggestion-items::-webkit-scrollbar { display: none; }
+
+.suggestion-piece {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 70px;
+}
+
+.suggestion-piece img {
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  object-fit: cover;
+  background: var(--surface2);
+}
+
+.suggestion-piece span {
+  font-size: 10px;
+  color: var(--text2);
+  text-align: center;
+  max-width: 70px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

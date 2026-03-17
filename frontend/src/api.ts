@@ -82,6 +82,8 @@ export interface DetectedItem {
   color: string;
   season: string;
   position: string;
+  bbox: number[] | null;
+  crop_image: string | null;
 }
 
 export interface ScanResult {
@@ -97,11 +99,26 @@ export async function scanCloset(file: File): Promise<ScanResult> {
   return res.json();
 }
 
-export async function bulkSaveGarments(file: File, items: { name: string; category: string; color: string; season: string }[]): Promise<Garment[]> {
+export async function bulkSaveGarments(file: File, items: { name: string; category: string; color: string; season: string; bbox?: number[] | null }[]): Promise<Garment[]> {
   const form = new FormData();
   form.append('image', file);
   form.append('items', JSON.stringify(items));
   const res = await fetch(`${BASE}/scan/bulk`, { method: 'POST', body: form });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export interface OutfitSuggestion {
+  name: string;
+  items: Garment[];
+}
+
+export async function suggestOutfits(garmentIds?: string[]): Promise<{ outfits: OutfitSuggestion[] }> {
+  const res = await fetch(`${BASE}/scan/suggest-outfits`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ garment_ids: garmentIds || [] })
+  });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }

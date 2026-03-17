@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { getGarments, uploadGarment, deleteGarment, scanCloset, bulkSaveGarments, Garment, DetectedItem } from '../api';
+import { getGarments, uploadGarment, deleteGarment, scanCloset, bulkSaveGarments, suggestOutfits, createOutfit, Garment, DetectedItem, OutfitSuggestion } from '../api';
 
 const CATEGORIES = ['all', 'tops', 'bottoms', 'shoes', 'outerwear', 'accessories', 'other'];
 
@@ -23,6 +23,12 @@ export default function Closet() {
   const [editingItem, setEditingItem] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const scanFileRef = useRef<HTMLInputElement>(null);
+
+  // Outfit suggestion state
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [suggestions, setSuggestions] = useState<OutfitSuggestion[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [savingOutfit, setSavingOutfit] = useState<string | null>(null);
 
   useEffect(() => {
     loadGarments();
@@ -79,7 +85,6 @@ export default function Closet() {
     try {
       const result = await scanCloset(scanFile);
       setDetectedItems(result.items);
-      // Select all by default
       setSelectedItems(new Set(result.items.map(i => i.id)));
     } catch (err: any) {
       console.error(err);
@@ -109,19 +114,54 @@ export default function Closet() {
     try {
       const itemsToSave = detectedItems
         .filter(i => selectedItems.has(i.id))
-        .map(({ name, category, color, season }) => ({ name, category, color, season }));
-      await bulkSaveGarments(scanFile, itemsToSave);
+        .map(({ name, category, color, season, bbox }) => ({ name, category, color, season, bbox }));
+      const saved = await bulkSaveGarments(scanFile, itemsToSave);
+
+      // Close scan modal
       setShowScan(false);
       setScanFile(null);
       setScanPreview(null);
       setDetectedItems([]);
       setSelectedItems(new Set());
       loadGarments();
+
+      // Auto-suggest outfits from the newly saved items
+      if (saved.length >= 2) {
+        setLoadingSuggestions(true);
+        setShowSuggestions(true);
+        try {
+          const result = await suggestOutfits(saved.map(g => g.id));
+          setSuggestions(result.outfits);
+        } catch (err) {
+          console.error('Suggestion failed:', err);
+          setSuggestions([]);
+        }
+        setLoadingSuggestions(false);
+      }
     } catch (err) {
       console.error(err);
       alert('Failed to save items');
     }
     setSaving(false);
+  }
+
+  async function handleSaveOutfit(suggestion: OutfitSuggestion) {
+    setSavingOutfit(suggestion.name);
+    try {
+      const items = suggestion.items.map((g, i) => ({
+        garment_id: g.id,
+        position_x: 50 + (i % 2) * 150,
+        position_y: 30 + Math.floor(i / 2) * 160,
+        scale: 1,
+        z_index: i,
+      }));
+      await createOutfit(suggestion.name, items);
+      setSuggestions(prev => prev.filter(s => s.name !== suggestion.name));
+      if (suggestions.length <= 1) setShowSuggestions(false);
+    } catch (err) {
+      console.error(err);
+    }
+    setSavingOutfit(null);
   }
 
   function closeScan() {
@@ -170,14 +210,12 @@ export default function Closet() {
       </button>
       <button className="fab" onClick={() => setShowUpload(true)}>+</button>
 
-      {/* Single upload modal (existing) */}
+      {/* Single upload modal */}
       {showUpload && (
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowUpload(false); }}>
           <div className="modal">
             <h2>Add to Closet</h2>
-
             <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={handleFile} style={{ display: 'none' }} />
-
             <div className="capture-area" onClick={() => fileRef.current?.click()}>
               {preview ? (
                 <img src={preview} alt="Preview" />
@@ -191,7 +229,6 @@ export default function Closet() {
                 </>
               )}
             </div>
-
             <div className="form-group">
               <label>Category</label>
               <div className="category-pills">
@@ -202,17 +239,14 @@ export default function Closet() {
                 ))}
               </div>
             </div>
-
             <div className="form-group">
               <label>Name (optional)</label>
               <input placeholder="e.g. Black Nike hoodie" value={meta.name} onChange={e => setMeta({ ...meta, name: e.target.value })} />
             </div>
-
             <div className="form-group">
               <label>Color</label>
               <input placeholder="e.g. black, navy, floral" value={meta.color} onChange={e => setMeta({ ...meta, color: e.target.value })} />
             </div>
-
             <div className="form-group">
               <label>Season</label>
               <div className="category-pills">
@@ -223,7 +257,6 @@ export default function Closet() {
                 ))}
               </div>
             </div>
-
             <button className="btn" onClick={handleUpload} disabled={!file || uploading}>
               {uploading ? 'Adding...' : 'Add to Closet'}
             </button>
@@ -236,10 +269,9 @@ export default function Closet() {
         <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) closeScan(); }}>
           <div className="modal scan-modal">
             <h2>Scan Closet</h2>
-
             <input ref={scanFileRef} type="file" accept="image/*" capture="environment" onChange={handleScanFile} style={{ display: 'none' }} />
 
-            {/* Step 1: Take/pick photo */}
+            {/* Step 1: Take photo */}
             {!detectedItems.length && (
               <>
                 <div className="capture-area" onClick={() => scanFileRef.current?.click()}>
@@ -255,11 +287,9 @@ export default function Closet() {
                     </>
                   )}
                 </div>
-
                 <button className="btn" onClick={handleScan} disabled={!scanFile || scanning}>
                   {scanning ? 'AI is scanning...' : 'Scan for Items'}
                 </button>
-
                 {scanning && (
                   <div className="scan-progress">
                     <div className="scan-spinner"></div>
@@ -269,7 +299,7 @@ export default function Closet() {
               </>
             )}
 
-            {/* Step 2: Review detected items */}
+            {/* Step 2: Review detected items with cropped previews */}
             {detectedItems.length > 0 && (
               <>
                 <div className="scan-preview-strip">
@@ -296,6 +326,13 @@ export default function Closet() {
                         )}
                       </div>
 
+                      {/* Cropped preview thumbnail */}
+                      {item.crop_image && (
+                        <div className="detected-thumb">
+                          <img src={`/uploads/${item.crop_image}`} alt={item.name} />
+                        </div>
+                      )}
+
                       <div className="detected-info" onClick={() => setEditingItem(editingItem === item.id ? null : item.id)}>
                         <div className="detected-name">{item.name}</div>
                         <div className="detected-meta">
@@ -309,7 +346,7 @@ export default function Closet() {
                   ))}
                 </div>
 
-                {/* Inline edit for a detected item */}
+                {/* Inline edit */}
                 {editingItem && (() => {
                   const item = detectedItems.find(i => i.id === editingItem);
                   if (!item) return null;
@@ -357,6 +394,55 @@ export default function Closet() {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Outfit Suggestions modal */}
+      {showSuggestions && (
+        <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) setShowSuggestions(false); }}>
+          <div className="modal scan-modal">
+            <h2>Outfit Ideas</h2>
+
+            {loadingSuggestions ? (
+              <div className="scan-progress">
+                <div className="scan-spinner"></div>
+                <p>Putting fits together from your closet...</p>
+              </div>
+            ) : suggestions.length === 0 ? (
+              <div className="empty" style={{ padding: '20px 0' }}>
+                <p>No outfit combos found — add more pieces!</p>
+              </div>
+            ) : (
+              <div className="suggestion-list">
+                {suggestions.map((s, idx) => (
+                  <div key={idx} className="suggestion-card">
+                    <div className="suggestion-header">
+                      <h3>{s.name}</h3>
+                      <button
+                        className="btn btn-small"
+                        onClick={() => handleSaveOutfit(s)}
+                        disabled={savingOutfit === s.name}
+                      >
+                        {savingOutfit === s.name ? 'Saving...' : 'Save Fit'}
+                      </button>
+                    </div>
+                    <div className="suggestion-items">
+                      {s.items.map(g => (
+                        <div key={g.id} className="suggestion-piece">
+                          <img src={`/uploads/${g.thumbnail_path}`} alt={g.name || g.category} />
+                          <span>{g.name || g.category}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <button className="btn btn-outline" style={{ marginTop: 12 }} onClick={() => setShowSuggestions(false)}>
+              Done
+            </button>
           </div>
         </div>
       )}
